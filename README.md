@@ -1,5 +1,9 @@
 # beir-openai-embeddings
 
+A repository of pregenerated embeddings for BeIR benchmarking datasets using paid OpenAI embedding models. These can be used to speed up your own benchmarking attempts and to save at least some money in the process.
+
+A python script is included that can be used to create more (or new) embeddings. If you do this, please contribute back the results.
+
 ## pregenerated
 
 Previously generated datasets are available in `/datasets`. [Git LFS](https://git-lfs.com/) is required to access them.
