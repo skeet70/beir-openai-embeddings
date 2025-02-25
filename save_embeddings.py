@@ -62,6 +62,8 @@ def process_chunks(chunks, embeddings_file):
         chunk_embeddings = np.array(
             [embedding_object["embedding"] for embedding_object in embeddings]
         )
+        full_doc_embedding = np.mean(chunk_embeddings, axis=0)
+
         embeddings_file.writeline(
             [
                 "{}\n".format(embedding_object["embedding"])
