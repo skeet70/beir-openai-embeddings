@@ -4,6 +4,7 @@ import os
 import json
 import pathlib
 import zipfile
+import tiktoken
 
 
 def download_url(url: str, save_path: str, chunk_size: int = 1024):
@@ -45,11 +46,11 @@ def download_and_unzip(url: str, out_dir: str, chunk_size: int = 1024) -> str:
     return os.path.join(out_dir, dataset.replace(".zip", ""))
 
 
-def process_batch(batch, embeddings_file):
+def process_chunks(chunks, embeddings_file):
     response = requests.request(
         method="post",
         url="https://api.openai.com/v1/embeddings",
-        json={"model": embedding_model, "input": batch},
+        json={"model": embedding_model, "input": chunks},
         headers={
             "Authorization": "Bearer {}".format(os.environ["OPENAI_API_KEY"]),
             "Content-Type": "application/json",
@@ -58,7 +59,10 @@ def process_batch(batch, embeddings_file):
     json = response.json()
     if "data" in json:
         embeddings = response.json()["data"]
-        embeddings_file.writelines(
+        chunk_embeddings = np.array(
+            [embedding_object["embedding"] for embedding_object in embeddings]
+        )
+        embeddings_file.writeline(
             [
                 "{}\n".format(embedding_object["embedding"])
                 for embedding_object in embeddings
@@ -66,9 +70,9 @@ def process_batch(batch, embeddings_file):
         )
     else:
         print(json)
-        print(batch)
+        print(chunks)
         print("Failed a batch, trying again. This is an infinite loop.")
-        process_batch(batch, embeddings_file)
+        process_chunks(chunks, embeddings_file)
 
 
 def count_existing_lines(file_path):
@@ -80,11 +84,21 @@ def count_existing_lines(file_path):
         return 0  # If file doesn't exist, start from the beginning
 
 
-def get_embeddings(source_path, output_path, batch_size):
+# ada-002 has a limit of 8192 tokens, so if we're coming close to that, break the text up into multiple chunks
+# that can be averages (naively)
+def chunk_text(text, max_tokens=7500):
+    encoding = toktoken.get_encoding(
+        "cl100k_base"
+    )  # the encoder used for ada-002 according to their docs
+    tokens = encoding.encode(text)
+    chunks = [tokens[x : x + max_tokens] for x in range(0, len(tokens), max_tokens)]
+    return [encoding.decode(x) for x in chunks]
+
+
+def get_embeddings(source_path, output_path):
     existing_line_count = count_existing_lines(output_path)
     source_line_count = sum(1 for _ in open(source_path, "r"))
     with open(source_path) as source_file, open(output_path, "a+") as embeddings_file:
-        batch = []
         # skip already processed lines
         for _ in range(existing_line_count):
             next(source_file, None)
@@ -94,23 +108,14 @@ def get_embeddings(source_path, output_path, batch_size):
             source_file, total=source_line_count - existing_line_count
         ):
             source_json = json.loads(source_line)
-            batch.append(source_json["text"])
-            if len(batch) == batch_size:
-                process_batch(batch, embeddings_file)
-                batch = []
-        # catch anything left in the batch at the end
-        if batch:
-            process_batch(batch, embeddings_file)
+            chunks = chunk_text(source_json["title"] + " " + source_json["text"])
+            process_chunks(chunks, embeddings_file)
 
 
 # change to get embeddings for a different dataset.
 dataset = "dbpedia-entity"
 # change to use a different openai model
 embedding_model = "text-embedding-ada-002"
-# change to make larger or smaller calls to openAI. Balance speed and response size.
-# if you get an error that `data` doesn't exist on the response, it's likely your
-# batch size is too big.
-BATCH_SIZE = 1
 
 # download the BeIR dataset
 url = (
@@ -130,6 +135,6 @@ corpus_embedding_path = data_path + "/corpus-{}-embeddings.jsonl".format(
 )
 
 print("Generating query embeddings for {} using {}.".format(dataset, embedding_model))
-get_embeddings(queries_path, queries_embedding_path, BATCH_SIZE)
+get_embeddings(queries_path, queries_embedding_path)
 print("Generating corpus embeddings for {} using {}.".format(dataset, embedding_model))
-get_embeddings(corpus_path, corpus_embedding_path, BATCH_SIZE)
+get_embeddings(corpus_path, corpus_embedding_path)
