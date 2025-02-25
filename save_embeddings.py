@@ -55,38 +55,62 @@ def process_batch(batch, embeddings_file):
             "Content-Type": "application/json",
         },
     )
-    embeddings = response.json()["data"]
-    embeddings_file.writelines(
-        [
-            "{}\n".format(embedding_object["embedding"])
-            for embedding_object in embeddings
-        ]
-    )
+    json = response.json()
+    if "data" in json:
+        embeddings = response.json()["data"]
+        embeddings_file.writelines(
+            [
+                "{}\n".format(embedding_object["embedding"])
+                for embedding_object in embeddings
+            ]
+        )
+    else:
+        print(json)
+        print(batch)
+        print("Failed a batch, trying again. This is an infinite loop.")
+        process_batch(batch, embeddings_file)
+
+
+def count_existing_lines(file_path):
+    """Count the number of lines in an existing embeddings file."""
+    try:
+        with open(file_path, "r") as f:
+            return sum(1 for _ in f)
+    except FileNotFoundError:
+        return 0  # If file doesn't exist, start from the beginning
 
 
 def get_embeddings(source_path, output_path, batch_size):
-    source_line_count = sum(1 for line in open(source_path, "r"))
+    existing_line_count = count_existing_lines(output_path)
+    source_line_count = sum(1 for _ in open(source_path, "r"))
     with open(source_path) as source_file, open(output_path, "a+") as embeddings_file:
         batch = []
-        # clear the output file
-        embeddings_file.seek(0)
-        embeddings_file.truncate()
-        embeddings_file.flush()
-        for source_line in tqdm(source_file, total=source_line_count):
+        # skip already processed lines
+        for _ in range(existing_line_count):
+            next(source_file, None)
+
+        # process the remaining lines
+        for source_line in tqdm(
+            source_file, total=source_line_count - existing_line_count
+        ):
             source_json = json.loads(source_line)
             batch.append(source_json["text"])
             if len(batch) == batch_size:
                 process_batch(batch, embeddings_file)
                 batch = []
-        process_batch(batch, embeddings_file)
+        # catch anything left in the batch at the end
+        if batch:
+            process_batch(batch, embeddings_file)
 
 
 # change to get embeddings for a different dataset.
-dataset = "nfcorpus"
+dataset = "dbpedia-entity"
 # change to use a different openai model
 embedding_model = "text-embedding-ada-002"
 # change to make larger or smaller calls to openAI. Balance speed and response size.
-BATCH_SIZE = 100
+# if you get an error that `data` doesn't exist on the response, it's likely your
+# batch size is too big.
+BATCH_SIZE = 1
 
 # download the BeIR dataset
 url = (
